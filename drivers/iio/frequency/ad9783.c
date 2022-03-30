@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0
 /**
- * @file ad9783.c
- * @author Sergiu Cuciurean (sergiu.cuciurean@analog.com)
- * @brief AD9783 family device driver
- * @version 0.1
- * @date 2022-03-08
- *
- * @copyright Copyright (c) 2022 Analog Devices Inc.
+ * 
+ * AD9783 family device driver
+ * 
+ * Copyright (c) 2022 Analog Devices Inc.
  *
  */
 #include <linux/bitfield.h>
@@ -253,7 +250,7 @@ static int ad9783_timing_adjust(struct ad9783_phy *phy)
 		table[smp][SET] = set;
 	}
 
-	for (i = 0; i < AD9783_MAX_SAMPL_DLY; i++) {
+	for (smp = -1, i = 0; i < AD9783_MAX_SAMPL_DLY; i++) {
 		if (table[i][SEEK] == 1 && table[i][SET] < table[i][HLD]) {
 			ret = abs((table[i][HLD] - table[i][SET]));
 			if (ret <= min) {
@@ -264,6 +261,8 @@ static int ad9783_timing_adjust(struct ad9783_phy *phy)
 			}
 		}
 	}
+	if (smp < 0)
+		return -EINVAL;
 
 	if (min == AD9783_MAX_SET) {
 		dev_err(&phy->spi->dev,
@@ -271,12 +270,24 @@ static int ad9783_timing_adjust(struct ad9783_phy *phy)
 		return -EINVAL;
 	}
 
-	if (!(table[smp - 1][SEEK] == table[smp + 1][SEEK] &&
-	      table[smp - 1][SEEK] == 1) &&
-	    !((table[smp][HLD] + table[smp][SET]) > 8)) {
+	ret = 0;
+	if (!((table[smp][HLD] + table[smp][SET]) > 8))
+		ret = 1;
+	if (smp == 0) {
+		if (table[smp + 1][SEEK] == 0)
+			ret = 1;
+	} else if (smp == AD9783_MAX_SAMPL_DLY - 1) {
+		if (table[smp - 1][SEEK] == 0)
+			ret = 1;
+	} else {
+		if (!(table[smp - 1][SEEK] == table[smp + 1][SEEK] &&
+	      	      table[smp - 1][SEEK] == 1))
+			ret = 1;
+	}
+	if (ret)
 		dev_warn(&phy->spi->dev,
 			 "Please check for excessive on the input clock line.");
-	}
+
 
 	ret = regmap_write(phy->regmap, AD9783_REG_TIMING_ADJUST, smp);
 	if (ret < 0)
@@ -351,10 +362,10 @@ static int ad9783_selftest_check(struct ad9783_phy *phy,
 			return ret;
 	}
 
-	usleep_range(5000, 5005);
+	usleep_range(5000, 6500);
 	cf_axi_dds_datasel(dds, 0, DATA_SEL_DDS);
 	cf_axi_dds_datasel(dds, 1, DATA_SEL_DDS);
-	usleep_range(5000, 5005);
+	usleep_range(5000, 6500);
 
 	if (bist_result[0] == bist_result[2] &&
 	    bist_result[1] == bist_result[3])
@@ -398,8 +409,10 @@ static int ad9783_set_chan_gain(struct ad9783_phy *phy, int ch,
 	mutex_lock(&phy->lock);
 	ret = regmap_update_bits(phy->regmap, AD9783_REG_DAC_MSB(ch),
 				 AD9783_DAC_MSB_MSK, (val >> 8) & 0x03);
-	if (ret >= 0)
-		ret = regmap_write(phy->regmap, AD9783_REG_DACB(ch), val);
+	if (ret < 0)
+		goto err_set_chan_gain;
+	ret = regmap_write(phy->regmap, AD9783_REG_DACB(ch), val);
+err_set_chan_gain:
 	mutex_unlock(&phy->lock);
 
 	return ret;
@@ -413,11 +426,15 @@ static int ad9783_get_chan_gain(struct ad9783_phy *phy, int ch,
 
 	mutex_lock(&phy->lock);
 	ret = regmap_read(phy->regmap, AD9783_REG_DACB(ch), &data);
-	if (ret >= 0)
-		ret = regmap_read(phy->regmap, AD9783_REG_DAC_MSB(ch), &reg);
+	if (ret < 0)
+		goto err_get_chan_gain;
+	ret = regmap_read(phy->regmap, AD9783_REG_DAC_MSB(ch), &reg);
+	if (ret < 0)
+		goto err_get_chan_gain;
 	data |= (reg & 0x03) << 8;
 	*val = DIV_ROUND_CLOSEST((data * 10 - 86600000), 220000);
 	*val2 = 1000000;
+err_get_chan_gain:
 	mutex_unlock(&phy->lock);
 
 	return ret;
@@ -435,8 +452,10 @@ static int ad9783_set_auxdac(struct ad9783_phy *phy, int ch,
 	mutex_lock(&phy->lock);
 	ret = regmap_update_bits(phy->regmap, AD9783_REG_AUXDAC_MSB(ch),
 				 AD9783_AUXDAC_MSB_MSK, (val >> 8) & 0x03);
-	if (ret >= 0)
-		ret = regmap_write(phy->regmap, AD9783_REG_AUXDAC(ch), val);
+	if (ret < 0)
+		goto err_set_auxdac;
+	ret = regmap_write(phy->regmap, AD9783_REG_AUXDAC(ch), val);
+err_set_auxdac:
 	mutex_unlock(&phy->lock);
 
 	return 0;
@@ -450,11 +469,15 @@ static int ad9783_get_auxdac(struct ad9783_phy *phy, int ch,
 
 	mutex_lock(&phy->lock);
 	ret = regmap_read(phy->regmap, AD9783_REG_AUXDAC(ch), &data);
-	if (ret >= 0)
-		ret = regmap_read(phy->regmap, AD9783_REG_AUXDAC_MSB(ch), &reg);
+	if (ret < 0)
+		goto err_get_auxdac;
+	ret = regmap_read(phy->regmap, AD9783_REG_AUXDAC_MSB(ch), &reg);
+	if (ret < 0)
+		goto err_get_auxdac;
 	data |= (reg & 0x03) << 8;
 	*val = data * AD9783_AUXDAC_OFFSET_I_LSB_NA;
 	*val2 = 1000000;
+err_get_auxdac:
 	mutex_unlock(&phy->lock);
 
 	return ret;
@@ -469,16 +492,14 @@ static int ad9783_write_raw(struct iio_dev *indio_dev,
 
 	switch (info) {
 	case IIO_CHAN_INFO_RAW:
-		ret = ad9783_set_auxdac(phy, chan->address % 2, val, val2);
-		break;
+		return ad9783_set_auxdac(phy, chan->address % 2, val, val2);
+
 	case IIO_CHAN_INFO_HARDWAREGAIN:
-		ret = ad9783_set_chan_gain(phy, chan->channel, val, val2);
-		break;
-	default:
-		ret = -EINVAL;
+		return ad9783_set_chan_gain(phy, chan->channel, val, val2);
+
 	}
 
-	return ret;
+	return -EINVAL;
 }
 
 static int ad9783_read_raw(struct iio_dev *indio_dev,
@@ -491,19 +512,20 @@ static int ad9783_read_raw(struct iio_dev *indio_dev,
 	switch (info) {
 	case IIO_CHAN_INFO_RAW:
 		ret = ad9783_get_auxdac(phy, chan->address % 2, val, val2);
-		if (ret >= 0)
-			ret = IIO_VAL_FRACTIONAL;
-		break;
+		if (ret < 0)
+			return ret;
+		
+		return IIO_VAL_FRACTIONAL;
+
 	case IIO_CHAN_INFO_HARDWAREGAIN:
 		ret = ad9783_get_chan_gain(phy, chan->address, val, val2);
-		if (ret >= 0)
-			ret = IIO_VAL_FRACTIONAL;
-		break;
-	default:
-		ret = -EINVAL;
+		if (ret < 0)
+			return ret;
+			
+		return IIO_VAL_FRACTIONAL;
 	}
 
-	return ret;
+	return -EINVAL;
 }
 
 static int ad9783_reg_access(struct iio_dev *indio_dev, unsigned int reg,
@@ -577,11 +599,9 @@ static int ad9783_get_active_output(struct iio_dev *indio_dev,
 	unsigned int reg;
 	int ret;
 
-	mutex_lock(&phy->lock);
 	ret = regmap_read(phy->regmap,
 			  AD9783_REG_AUXDAC_MSB(chan->address % 2),
 			  &reg);
-	mutex_unlock(&phy->lock);
 	if (ret < 0)
 		return ret;
 
@@ -595,13 +615,9 @@ static int ad9783_set_output_type(struct iio_dev *indio_dev,
 	struct ad9783_phy *phy = iio_priv(indio_dev);
 	int ret;
 
-	mutex_lock(&phy->lock);
-	ret = regmap_update_bits(phy->regmap,
-				 AD9783_REG_AUXDAC_MSB(chan->channel),
-				 AD9783_AUXDIR_MSK, type);
-	mutex_unlock(&phy->lock);
-
-	return ret;
+	return regmap_update_bits(phy->regmap,
+				  AD9783_REG_AUXDAC_MSB(chan->channel),
+				  AD9783_AUXDIR_MSK, type);
 }
 
 static int ad9783_get_output_type(struct iio_dev *indio_dev,
@@ -739,15 +755,14 @@ static int ad9783_setup(struct cf_axi_converter *conv)
 	indio_dev->channels = ad9783_channels[phy->device_id];
 	indio_dev->num_channels = ARRAY_SIZE(ad9783_channels[phy->device_id]);
 	if (phy->reset_gpio) {
-		gpiod_set_value_cansleep(phy->reset_gpio, 1);
-		usleep_range(10, 15);
 		gpiod_set_value_cansleep(phy->reset_gpio, 0);
 		usleep_range(10, 15);
+	} else {
+		ret = regmap_write(phy->regmap, AD9783_REG_SPI_CONTROL,
+				   AD9783_SPI_RESET);
+		if (ret < 0)
+			return -ENXIO;
 	}
-	ret = regmap_write(phy->regmap, AD9783_REG_SPI_CONTROL,
-			   AD9783_SPI_RESET);
-	if (ret < 0)
-		return -ENXIO;
 
 	if (ad9783_interface_tune(phy) < 0)
 		dev_warn(&phy->spi->dev, "Selftest failed.");
@@ -811,7 +826,7 @@ static int ad9783_probe(struct spi_device *spi)
 		return ret;
 
 	phy->reset_gpio = devm_gpiod_get_optional(&spi->dev, "reset",
-						  GPIOD_OUT_LOW);
+						  GPIOD_OUT_HIGH);
 	if (IS_ERR(phy->reset_gpio))
 		return PTR_ERR(phy->reset_gpio);
 
