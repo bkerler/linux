@@ -1316,7 +1316,8 @@ static int ad9528_jesd204_link_supported(struct jesd204_dev *jdev,
 	dev_dbg(dev, "%s:%d link_num %u LMFC/LEMC %u/%lu gcd %u\n",
 		__func__, __LINE__, lnk->link_id, st->jdev_lmfc_lemc_rate,
 		rate, st->jdev_lmfc_lemc_gcd);
-	if (ret)
+
+	if (ret && lnk->subclass != JESD204_SUBCLASS_0)
 		return ret;
 
 	return JESD204_STATE_CHANGE_DONE;
@@ -1395,6 +1396,26 @@ static int ad9528_jesd204_link_pre_setup(struct jesd204_dev *jdev,
 	return JESD204_STATE_CHANGE_DONE;
 }
 
+static int ad9528_jesd204_clks_sync(struct jesd204_dev *jdev,
+				      enum jesd204_state_op_reason reason)
+{
+	struct device *dev = jesd204_dev_to_device(jdev);
+	struct iio_dev *indio_dev = dev_get_drvdata(dev);
+	int ret;
+
+	if (reason != JESD204_STATE_OP_REASON_INIT)
+		return JESD204_STATE_CHANGE_DONE;
+
+	dev_dbg(dev, "%s:%d reason %s\n", __func__, __LINE__,
+		jesd204_state_op_reason_str(reason));
+
+	ret = ad9528_sync(indio_dev);
+	if (ret)
+		return ret;
+
+	return JESD204_STATE_CHANGE_DONE;
+}
+
 static const struct jesd204_dev_data jesd204_ad9528_init = {
 	.sysref_cb = ad9528_jesd204_sysref,
 	.state_ops = {
@@ -1403,6 +1424,10 @@ static const struct jesd204_dev_data jesd204_ad9528_init = {
 		},
 		[JESD204_OP_LINK_PRE_SETUP] = {
 			.per_link = ad9528_jesd204_link_pre_setup,
+		},
+		[JESD204_OP_CLK_SYNC_STAGE1] = {
+			.per_device = ad9528_jesd204_clks_sync,
+			.mode = JESD204_STATE_OP_MODE_PER_DEVICE,
 		},
 	},
 };

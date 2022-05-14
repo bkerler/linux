@@ -930,7 +930,7 @@ static int axi_jesd204_rx_jesd204_clks_enable(struct jesd204_dev *jdev,
 	case JESD204_STATE_OP_REASON_UNINIT:
 		if (__clk_is_enabled(jesd->device_clk))
 			clk_disable_unprepare(jesd->device_clk);
-		if (!IS_ERR(jesd->link_clk)) {
+		if (!IS_ERR_OR_NULL(jesd->link_clk)) {
 			if (__clk_is_enabled(jesd->link_clk))
 				clk_disable_unprepare(jesd->link_clk);
 		}
@@ -1013,7 +1013,7 @@ static int axi_jesd204_rx_jesd204_link_running(struct jesd204_dev *jdev,
 	struct device *dev = jesd204_dev_to_device(jdev);
 	struct axi_jesd204_rx *jesd = dev_get_drvdata(dev);
 	unsigned int link_status;
-	int retry = 10;
+	int retry = 20;
 
 	dev_dbg(dev, "%s:%d link_num %u reason %s\n", __func__, __LINE__,
 		lnk->link_id, jesd204_state_op_reason_str(reason));
@@ -1168,19 +1168,13 @@ static int axi_jesd204_rx_probe(struct platform_device *pdev)
 	 * This is used in axi_jesd204_rx_jesd204_link_setup() where the
 	 * main REFCLK is the parent of jesd->lane_clk.
 	 */
-	jesd->conv2_clk = devm_clk_get(&pdev->dev, "conv2");
-	if (IS_ERR(jesd->conv2_clk)) {
-		if (PTR_ERR(jesd->conv2_clk) != -ENOENT)
-			return PTR_ERR(jesd->conv2_clk);
-		jesd->conv2_clk = NULL;
-	}
+	jesd->conv2_clk = devm_clk_get_optional(&pdev->dev, "conv2");
+	if (IS_ERR(jesd->conv2_clk))
+		return PTR_ERR(jesd->conv2_clk);
 
-	jesd->link_clk = devm_clk_get(&pdev->dev, "link_clk");
-	if (IS_ERR(jesd->link_clk)) {
-		if (PTR_ERR(jesd->link_clk) != -ENOENT)
-			return PTR_ERR(jesd->link_clk);
-		jesd->link_clk = NULL;
-	}
+	jesd->link_clk = devm_clk_get_optional(&pdev->dev, "link_clk");
+	if (IS_ERR(jesd->link_clk))
+		return PTR_ERR(jesd->link_clk);
 
 	ret = clk_prepare_enable(jesd->axi_clk);
 	if (ret)
