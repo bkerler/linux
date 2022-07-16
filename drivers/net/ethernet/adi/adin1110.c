@@ -355,6 +355,10 @@ static int adin1110_read_fifo(struct adin1110_port_priv *port_priv)
 		return ret;
 	}
 
+	/* Already forwarded to the other port if it did not match any MAC Addresses. */
+	if (priv->cfg->id == ADIN2111_MAC)
+		rxb->offload_fwd_mark = 1;
+
 	skb_put(rxb, frame_size_no_fcs);
 	skb_copy_to_linear_data(rxb, &priv->data[header_len + ADIN1110_FRAME_HEADER_LEN],
 				frame_size_no_fcs);
@@ -681,8 +685,8 @@ static int adin1110_multicast_filter(struct adin1110_port_priv *port_priv, int m
 	u8 mac[ETH_ALEN] = {0};
 
 	if (accept_multicast) {
-		mask[0] = BIT(1);
-		mac[0] = BIT(1);
+		mask[0] = BIT(0);
+		mac[0] = BIT(0);
 
 		return adin1110_write_mac_address(port_priv, mac_nr, mac, mask);
 	}
@@ -1069,6 +1073,7 @@ static int adin1110_probe_netdevs(struct adin1110_priv *priv)
 		netdev->if_port = IF_PORT_10BASET;
 		netdev->netdev_ops = &adin1110_netdev_ops;
 		netdev->ethtool_ops = &adin1110_ethtool_ops;
+		netdev->priv_flags |= IFF_UNICAST_FLT;
 
 		switch (priv->cfg->id) {
 		case ADIN1110_MAC:
